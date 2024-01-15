@@ -43,9 +43,12 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port);
 
     // Load public certificate.
-    let certs = load_certs("examples/sample.pem")?;
+    //let certs = load_certs("examples/sample.pem")?;
+    let certs = load_certs("certs/server.crt")?;
+
     // Load private key.
-    let key = load_private_key("examples/sample.rsa")?;
+    //let key = load_private_key("examples/sample.rsa")?;
+    let key = load_private_key("certs/server.key")?;
 
     println!("Starting to serve on https://{}", addr);
 
