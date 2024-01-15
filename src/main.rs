@@ -87,10 +87,29 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
 }
 
+fn isAuthenticated(req: &Request<Incoming>) -> bool {
+    return match req.headers().get("mj_is_goat") {
+        None => false,
+        Some(v) => match v.to_str() {
+            Ok(v) => v.to_lowercase() == "true",
+            Err(e) => false,
+        },
+    };
+}
+
 // Custom echo service, handling two different routes and a
 // catch-all 404 responder.
-async fn echo(req: Request<Incoming>) -> Result<Response<Full<Bytes>>, hyper::Error> {
+async fn echo(mut req: Request<Incoming>) -> Result<Response<Full<Bytes>>, hyper::Error> {
     let mut response = Response::new(Full::default());
+
+    // Request middlewares.
+    if !isAuthenticated(&req) {
+        *response.status_mut() = hyper::StatusCode::BAD_REQUEST;
+        *response.body_mut() = Full::from("Auth failed");
+        return Ok(response);
+    }
+    // Request middlewares end
+
     match (req.method(), req.uri().path()) {
         // Help route.
         (&Method::GET, "/") => {
@@ -98,12 +117,7 @@ async fn echo(req: Request<Incoming>) -> Result<Response<Full<Bytes>>, hyper::Er
         }
         // Echo service route.
         (&Method::POST, "/echo") => {
-            *response.body_mut() = Full::from(
-                req.into_body()
-                    .collect()
-                    .await?
-                    .to_bytes(),
-            );
+            *response.body_mut() = Full::from(req.into_body().collect().await?.to_bytes());
         }
         // Catch-all 404.
         _ => {
