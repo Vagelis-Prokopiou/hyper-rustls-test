@@ -5,19 +5,14 @@
 //! hyper will automatically use HTTP/2 if a client starts talking HTTP/2,
 //! otherwise HTTP/1.1 will be used.
 
-use std::net::{Ipv4Addr, SocketAddr};
-use std::sync::Arc;
-use std::vec::Vec;
-use std::{env, fs, io};
-
-use http::{Method, Request, Response, StatusCode};
-use http_body_util::{BodyExt, Full};
-use hyper::body::{Bytes, Incoming};
 use hyper::service::service_fn;
+use hyper_rustls_test::{handlers::root_handler, *};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto::Builder;
-use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::ServerConfig;
+use std::env;
+use std::net::{Ipv4Addr, SocketAddr};
+use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
 
@@ -29,10 +24,6 @@ fn main() {
     }
 }
 
-fn error(err: String) -> io::Error {
-    io::Error::new(io::ErrorKind::Other, err)
-}
-
 #[tokio::main]
 async fn run_server() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // First parameter is port number (optional, defaults to 1337)
@@ -41,16 +32,8 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         None => 1337,
     };
     let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port);
-
-    // Load public certificate.
-    //let certs = load_certs("examples/sample.pem")?;
     let certs = load_certs("certs/server.crt")?;
-
-    // Load private key.
-    //let key = load_private_key("examples/sample.rsa")?;
     let key = load_private_key("certs/server.key")?;
-
-    println!("Starting to serve on https://{}", addr);
 
     // Create a TCP listener via tokio.
     let incoming = TcpListener::bind(&addr).await?;
@@ -61,10 +44,11 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .with_single_cert(certs, key)
         .map_err(|e| error(e.to_string()))?;
     server_config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec(), b"http/1.0".to_vec()];
+
     let tls_acceptor = TlsAcceptor::from(Arc::new(server_config));
+    let service = service_fn(root_handler);
 
-    let service = service_fn(echo);
-
+    println!("Starting to serve on https://{}", addr);
     loop {
         let (tcp_stream, _remote_addr) = incoming.accept().await?;
 
@@ -85,66 +69,4 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             }
         });
     }
-}
-
-fn isAuthenticated(req: &Request<Incoming>) -> bool {
-    return match req.headers().get("mj_is_goat") {
-        None => false,
-        Some(v) => match v.to_str() {
-            Ok(v) => v.to_lowercase() == "true",
-            Err(e) => false,
-        },
-    };
-}
-
-// Custom echo service, handling two different routes and a
-// catch-all 404 responder.
-async fn echo(mut req: Request<Incoming>) -> Result<Response<Full<Bytes>>, hyper::Error> {
-    let mut response = Response::new(Full::default());
-
-    // Request middlewares.
-    if !isAuthenticated(&req) {
-        *response.status_mut() = hyper::StatusCode::BAD_REQUEST;
-        *response.body_mut() = Full::from("Auth failed");
-        return Ok(response);
-    }
-    // Request middlewares end
-
-    match (req.method(), req.uri().path()) {
-        // Help route.
-        (&Method::GET, "/") => {
-            *response.body_mut() = Full::from("Try POST /echo\n");
-        }
-        // Echo service route.
-        (&Method::POST, "/echo") => {
-            *response.body_mut() = Full::from(req.into_body().collect().await?.to_bytes());
-        }
-        // Catch-all 404.
-        _ => {
-            *response.status_mut() = StatusCode::NOT_FOUND;
-        }
-    };
-    Ok(response)
-}
-
-// Load public certificate from file.
-fn load_certs(filename: &str) -> io::Result<Vec<CertificateDer<'static>>> {
-    // Open certificate file.
-    let certfile = fs::File::open(filename)
-        .map_err(|e| error(format!("failed to open {}: {}", filename, e)))?;
-    let mut reader = io::BufReader::new(certfile);
-
-    // Load and return certificate.
-    rustls_pemfile::certs(&mut reader).collect()
-}
-
-// Load private key from file.
-fn load_private_key(filename: &str) -> io::Result<PrivateKeyDer<'static>> {
-    // Open keyfile.
-    let keyfile = fs::File::open(filename)
-        .map_err(|e| error(format!("failed to open {}: {}", filename, e)))?;
-    let mut reader = io::BufReader::new(keyfile);
-
-    // Load and return a single private key.
-    rustls_pemfile::private_key(&mut reader).map(|key| key.unwrap())
 }
